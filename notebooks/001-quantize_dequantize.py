@@ -276,24 +276,13 @@ def compare_quant_values(shape=(128, 64), dtype=torch.float16, seed=42):
 
 
 # %%
-def run_comparison_suite(shapes_to_test=None):
+def run_comparison_suite():
     """
-    Run a comprehensive comparison suite on multiple tensor shapes
-
-    Args:
-        shapes_to_test: List of tensor shapes to test
+    Run a comprehensive comparison suite on a reference tensor
 
     Returns:
         None
     """
-    if shapes_to_test is None:
-        shapes_to_test = [
-            (128, 64),  # Standard rectangular matrix
-            # (256, 256),      # Medium square matrix
-            # (1024, 64),      # Tall matrix
-            # (64, 1024)       # Wide matrix
-        ]
-
     # Create a mid-sized test tensor for detailed analysis
     torch.manual_seed(42)
     test_tensor = torch.randn(128, 64, dtype=torch.float16).to(device)
@@ -308,36 +297,15 @@ def run_comparison_suite(shapes_to_test=None):
     )
 
     # Generate heatmap visualization
-    orig_sample, bnb_sample, custom_sample, bnb_error, custom_error = (
-        plot_heatmap_comparison(
-            test_tensor, bnb_result, custom_result, "Heatmap Comparison"
-        )
+    plot_heatmap_comparison(
+        test_tensor, bnb_result, custom_result, "Heatmap Comparison"
     )
 
     # Compare FP4 quantization values
-    matrix, (bnb_quantized, bnb_dequantized), (custom_quantized, custom_dequantized) = (
-        compare_quant_values()
-    )
+    compare_quant_values()
 
     # Analyze absmax scaling
-    original_absmax, scaled_absmax = plot_absmax_comparison(test_tensor)
-
-    # Test with different shapes
-    print("\n===== TESTING DIFFERENT TENSOR SHAPES =====")
-    for shape in shapes_to_test:
-        if shape == (128, 64):  # Skip if already tested
-            continue
-
-        print(f"\n{'='*50}")
-        print(f"Testing with shape: {shape}")
-        print(f"{'='*50}")
-        # All these shapes have total elements divisible by 64
-        test_tensor = torch.randn(*shape, dtype=torch.float16).to(device)
-        bnb_result, custom_result = compare_implementations(test_tensor)
-        # Plot comparison for this shape
-        plot_comparison(
-            test_tensor, bnb_result, custom_result, f"Comparison for {shape} tensor"
-        )
+    plot_absmax_comparison(test_tensor)
 
 
 # %% [markdown]
@@ -356,3 +324,33 @@ def run_comparison_suite(shapes_to_test=None):
 # %%
 # Run the full comparison suite
 run_comparison_suite()
+
+# %% [markdown]
+# ## Testing Different Tensor Shapes
+#
+# Additional testing with different tensor shapes
+
+# %%
+# Commented out: Testing with different tensor shapes
+"""
+def test_different_shapes():
+    shapes_to_test = [
+        (256, 256),      # Medium square matrix
+        (1024, 64),      # Tall matrix
+        (64, 1024)       # Wide matrix
+    ]
+
+    for shape in shapes_to_test:
+        print(f"\n{'='*50}")
+        print(f"Testing with shape: {shape}")
+        print(f"{'='*50}")
+        # All these shapes have total elements divisible by 64
+        test_tensor = torch.randn(*shape, dtype=torch.float16).to(device)
+        bnb_result, custom_result = compare_implementations(test_tensor)
+        # Plot comparison for this shape
+        plot_comparison(
+            test_tensor, bnb_result, custom_result, f"Comparison for {shape} tensor"
+        )
+
+# test_different_shapes()
+"""
