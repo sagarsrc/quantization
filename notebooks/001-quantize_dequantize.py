@@ -12,10 +12,24 @@ import pandas as pd
 sns.set_style("whitegrid")
 sns.set_context("talk")
 
+#%% [markdown]
+# # FP4 Quantization and Dequantization Analysis
+#
+# This notebook compares the BitsAndBytes (BnB) and custom implementations of FP4 quantization.
+# We'll analyze:
+# 1. Quantization accuracy
+# 2. Error distributions
+# 3. Visual comparisons of the representations
+
 #%%
 # Main configuration
 device = torch.device("cuda")
 blocksize = 64
+
+#%% [markdown]
+# ## Basic Testing
+#
+# First, we'll run a simple test to compare both implementations on a small tensor.
 
 #%%
 def run_basic_test(tensor_shape=(8, 8), seed=137):
@@ -55,6 +69,17 @@ def run_basic_test(tensor_shape=(8, 8), seed=137):
 
 # Run basic test
 original, bnb_results, custom_results = run_basic_test()
+
+#%% [markdown]
+# ## Visual Comparison Methods
+#
+# The following functions provide visual comparisons between original tensors and their quantized/dequantized versions.
+#
+# ### Line Plot Comparison
+#
+# This plot shows how well the dequantized values match the original tensor values. The closer the lines, the better.
+# - Top row: Direct value comparison between original and dequantized values
+# - Bottom row: Error distribution, showing how errors are distributed (ideally centered around zero)
 
 #%%
 def plot_comparison(original, bnb_dequant, custom_dequant, title="Comparison of Quantization Methods",
@@ -117,8 +142,16 @@ def plot_comparison(original, bnb_dequant, custom_dequant, title="Comparison of 
 
     plt.suptitle(title, fontsize=16)
     plt.tight_layout()
-    plt.savefig(f"{title.replace(' ', '_').lower()}.png")
     plt.show()
+
+#%% [markdown]
+# ### Heatmap Comparison
+#
+# Heatmaps provide spatial insights into quantization errors:
+# - Top row: Values visualization (original, BnB dequantized, custom dequantized)
+# - Bottom left: BnB error magnitude (brighter = higher error)
+# - Bottom middle: Custom error magnitude (brighter = higher error)
+# - Bottom right: Error difference (blue = BnB better, red = custom better)
 
 #%%
 def plot_heatmap_comparison(original, bnb_dequant, custom_dequant, title="Heatmap Comparison",
@@ -185,10 +218,19 @@ def plot_heatmap_comparison(original, bnb_dequant, custom_dequant, title="Heatma
 
     plt.suptitle(title, fontsize=16)
     plt.tight_layout()
-    plt.savefig(f"{title.replace(' ', '_').lower()}_heatmap.png")
     plt.show()
 
     return orig_sample, bnb_sample, custom_sample, bnb_error, custom_error
+
+#%% [markdown]
+# ## Comprehensive Implementation Comparison
+#
+# This function performs detailed analysis between the two implementations on a given tensor,
+# including:
+# - Timing measurements
+# - Error metrics (MAE, MSE)
+# - Memory efficiency
+# - Implementation similarity
 
 #%%
 def compare_implementations(test_tensor, blocksize=64):
@@ -273,53 +315,98 @@ def compare_implementations(test_tensor, blocksize=64):
 
     return bnb_dequantized, custom_dequantized
 
+#%% [markdown]
+# ## Matrix Quantization Analysis
+#
+# This function tests both implementations on a random matrix and analyzes quantization/dequantization performance.
+#
+# The plots show:
+# 1. **Value Plots**: Original vs quantized values sample - how closely the dequantized values follow the original
+# 2. **Error Distributions**: How the errors are distributed - a narrower distribution around zero indicates better performance
+
 #%%
-def compare_quant_values():
+def compare_quant_values(shape=(128, 64), dtype=torch.float16, seed=42):
     """
-    Compare the quantization codes used by BnB and custom implementation
+    Test FP4 quantization and dequantization on a random matrix.
+
+    Args:
+        shape: Shape of the test matrix (default: (128, 64))
+        dtype: Data type of the test matrix (default: torch.float16)
+        seed: Random seed for reproducibility (default: 42)
 
     Returns:
-        Tuple of numpy arrays with FP4 values for both implementations
+        Tuple containing original tensor, bnb results, and custom results
     """
-    # Get our FP4 values
-    from src.utils.bnb_functional import FP4_VALUES
-    custom_values = FP4_VALUES.cpu().numpy()
+    # Create a random matrix
+    torch.manual_seed(seed)
+    matrix = torch.randn(*shape, dtype=dtype).to(device)
 
-    # Get BnB FP4 values
-    # Note: This is based on the known values from bitsandbytes fp4 implementation
-    bnb_values = np.array([0, 0.0625, 8.0, 12.0, 4.0, 6.0, 2.0, 3.0,
-                          -0, -0.0625, -8.0, -12.0, -4.0, -6.0, -2.0, -3.0])
+    # Get BNB implementation results
+    bnb_quantized, bnb_state = F.quantize_fp4(matrix)
+    bnb_dequantized = F.dequantize_fp4(bnb_quantized, bnb_state)
 
-    # Create comparison plot with seaborn
-    plt.figure(figsize=(12, 7))
+    # Get custom implementation results
+    custom_quantized, custom_state = quantize_fp4(matrix)
+    custom_dequantized = dequantize_fp4(custom_quantized, custom_state)
 
-    # Create a DataFrame for the values
-    df = pd.DataFrame({
-        'Index': list(range(16)) + list(range(16)),
-        'Value': list(custom_values) + list(bnb_values),
-        'Implementation': ['Custom'] * 16 + ['BnB'] * 16
-    })
+    # Calculate error metrics
+    bnb_mae = torch.mean(torch.abs(matrix - bnb_dequantized)).item()
+    custom_mae = torch.mean(torch.abs(matrix - custom_dequantized)).item()
+    bnb_mse = torch.mean((matrix - bnb_dequantized) ** 2).item()
+    custom_mse = torch.mean((matrix - custom_dequantized) ** 2).item()
 
-    # Plot with seaborn
-    sns.barplot(x='Index', y='Value', hue='Implementation', data=df)
-    plt.title('Comparison of FP4 Quantization Values', fontsize=16)
-    plt.xlabel('Index')
-    plt.ylabel('Value')
-    plt.grid(True, alpha=0.3)
+    # Compare implementations
+    implementation_diff = torch.mean(torch.abs(bnb_dequantized - custom_dequantized)).item()
+
+    # Print comparison results
+    print(f"Matrix shape: {matrix.shape}")
+    print(f"BnB MAE: {bnb_mae:.6f}, MSE: {bnb_mse:.6f}")
+    print(f"Custom MAE: {custom_mae:.6f}, MSE: {custom_mse:.6f}")
+    print(f"Implementation difference: {implementation_diff:.6f}")
+
+    # Plot comparison
+    sample_size = 50
+    matrix_sample = matrix.flatten()[:sample_size].cpu().numpy()
+    bnb_sample = bnb_dequantized.flatten()[:sample_size].cpu().numpy()
+    custom_sample = custom_dequantized.flatten()[:sample_size].cpu().numpy()
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+    # Value comparison plots using seaborn
+    sample_indices = range(sample_size)
+    sns.lineplot(x=sample_indices, y=matrix_sample, ax=axes[0, 0], label='Original', linewidth=2)
+    sns.lineplot(x=sample_indices, y=bnb_sample, ax=axes[0, 0], label='BnB', alpha=0.8, linewidth=1.5)
+    axes[0, 0].set_title('Original vs BnB')
+    axes[0, 0].legend()
+
+    sns.lineplot(x=sample_indices, y=matrix_sample, ax=axes[0, 1], label='Original', linewidth=2)
+    sns.lineplot(x=sample_indices, y=custom_sample, ax=axes[0, 1], label='Custom', alpha=0.8, linewidth=1.5)
+    axes[0, 1].set_title('Original vs Custom')
+    axes[0, 1].legend()
+
+    # Error distribution plots with seaborn
+    bnb_errors = (matrix - bnb_dequantized).flatten().cpu().numpy()
+    custom_errors = (matrix - custom_dequantized).flatten().cpu().numpy()
+
+    sns.histplot(bnb_errors, ax=axes[1, 0], kde=True, stat="density", color="blue", alpha=0.7)
+    axes[1, 0].set_title(f'BnB Error (MAE: {bnb_mae:.6f})')
+
+    sns.histplot(custom_errors, ax=axes[1, 1], kde=True, stat="density", color="blue", alpha=0.7)
+    axes[1, 1].set_title(f'Custom Error (MAE: {custom_mae:.6f})')
+
     plt.tight_layout()
-    plt.savefig("fp4_value_comparison.png")
     plt.show()
 
-    # Print table for comparison
-    print("\n===== FP4 Values Comparison =====")
-    df_table = pd.DataFrame({
-        'Index': range(16),
-        'Custom FP4': custom_values,
-        'BnB FP4': bnb_values
-    })
-    print(df_table.to_string(index=False, float_format=lambda x: f"{x:.6f}"))
+    return matrix, (bnb_quantized, bnb_dequantized), (custom_quantized, custom_dequantized)
 
-    return custom_values, bnb_values
+#%% [markdown]
+# ## AbsMax Scaling Analysis
+#
+# This function visualizes how absmax values are calculated in both implementations.
+#
+# The plots show:
+# 1. **Distribution**: How absmax values are distributed across blocks
+# 2. **Scaling Relationship**: The relationship between BnB and custom absmax values (should follow y = x/12 line)
 
 #%%
 def plot_absmax_comparison(test_tensor, blocksize=64):
@@ -340,18 +427,15 @@ def plot_absmax_comparison(test_tensor, blocksize=64):
     bnb_absmax = blocks.abs().max(dim=1).values.float().cpu().numpy()
     custom_absmax = (blocks.abs().max(dim=1).values / 12.0).float().cpu().numpy()
 
-    plt.figure(figsize=(12, 6))
-
     # Plot the distributions
+    plt.figure(figsize=(12, 6))
     sns.histplot(bnb_absmax, kde=True, color='blue', alpha=0.5, label='Original absmax')
     sns.histplot(custom_absmax, kde=True, color='red', alpha=0.5, label='Scaled absmax (÷12)')
-
     plt.title('Distribution of absmax values across blocks', fontsize=16)
     plt.xlabel('absmax value')
     plt.ylabel('Frequency')
     plt.legend()
     plt.grid(True, alpha=0.3)
-    plt.savefig("absmax_distribution.png")
     plt.show()
 
     # Create scatter plot to compare scaling
@@ -369,10 +453,19 @@ def plot_absmax_comparison(test_tensor, blocksize=64):
     plt.ylabel('Scaled absmax (÷12)')
     plt.legend()
     plt.grid(True)
-    plt.savefig("absmax_scaling.png")
     plt.show()
 
     return bnb_absmax, custom_absmax
+
+#%% [markdown]
+# ## Complete Comparison Suite
+#
+# This function runs a comprehensive comparison suite on multiple tensor shapes.
+#
+# The analysis includes:
+# - Performance metrics on reference tensor
+# - Visual comparisons of quantization quality
+# - Evaluation across different tensor shapes to measure consistency
 
 #%%
 def run_comparison_suite(shapes_to_test=None):
@@ -388,7 +481,7 @@ def run_comparison_suite(shapes_to_test=None):
     if shapes_to_test is None:
         shapes_to_test = [
             (128, 64),         # Standard rectangular matrix
-            (256, 256),        # Medium square matrix
+            # (256, 256),      # Medium square matrix
             # (1024, 64),      # Tall matrix
             # (64, 1024)       # Wide matrix
         ]
@@ -410,7 +503,7 @@ def run_comparison_suite(shapes_to_test=None):
     )
 
     # Compare FP4 quantization values
-    custom_fp4, bnb_fp4 = compare_quant_values()
+    matrix, (bnb_quantized, bnb_dequantized), (custom_quantized, custom_dequantized) = compare_quant_values()
 
     # Analyze absmax scaling
     original_absmax, scaled_absmax = plot_absmax_comparison(test_tensor)
@@ -429,6 +522,19 @@ def run_comparison_suite(shapes_to_test=None):
         bnb_result, custom_result = compare_implementations(test_tensor)
         # Plot comparison for this shape
         plot_comparison(test_tensor, bnb_result, custom_result, f"Comparison for {shape} tensor")
+
+#%% [markdown]
+# ## Run the Analysis
+#
+# Execute the complete comparison suite to analyze FP4 quantization.
+#
+# **How to interpret the results:**
+#
+# 1. **Line plots**: Look for how closely the dequantized values (orange/green) follow the original values (blue)
+# 2. **Error histograms**: A narrow distribution centered at zero indicates better quantization
+# 3. **Heatmaps**: Areas with brighter colors in error maps show higher quantization errors
+# 4. **Metrics table**: Compare MAE (Mean Absolute Error), MSE, and execution time
+# 5. **AbsMax distribution**: Shows how scaling factors are distributed across blocks
 
 #%%
 # Run the full comparison suite
