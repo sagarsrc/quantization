@@ -10,33 +10,38 @@ from typing import Optional, Tuple, Any, Dict, Union, Sequence
 
 # FP4 quantization values - updated to match bitsandbytes implementation
 # These values are from the bitsandbytes FP4 data type implementation
-FP4_VALUES = torch.tensor([
-    0.0,         # 0000 (0)
-    0.0625,      # 0001 (1) - smallest positive value
-    8.0,         # 0010 (2)
-    12.0,        # 0011 (3)
-    4.0,         # 0100 (4)
-    6.0,         # 0101 (5)
-    2.0,         # 0110 (6)
-    3.0,         # 0111 (7) - largest positive normal
-    0.0,         # 1000 (8) - zero with negative sign bit (treated as 0)
-    -0.0625,     # 1001 (9) - smallest negative value
-    -8.0,        # 1010 (10)
-    -12.0,       # 1011 (11)
-    -4.0,        # 1100 (12)
-    -6.0,        # 1101 (13)
-    -2.0,        # 1110 (14)
-    -3.0,        # 1111 (15) - largest negative normal
-], dtype=torch.float32)
+FP4_VALUES = torch.tensor(
+    [
+        0.0,  # 0000 (0)
+        0.0625,  # 0001 (1) - smallest positive value
+        8.0,  # 0010 (2)
+        12.0,  # 0011 (3)
+        4.0,  # 0100 (4)
+        6.0,  # 0101 (5)
+        2.0,  # 0110 (6)
+        3.0,  # 0111 (7) - largest positive normal
+        0.0,  # 1000 (8) - zero with negative sign bit (treated as 0)
+        -0.0625,  # 1001 (9) - smallest negative value
+        -8.0,  # 1010 (10)
+        -12.0,  # 1011 (11)
+        -4.0,  # 1100 (12)
+        -6.0,  # 1101 (13)
+        -2.0,  # 1110 (14)
+        -3.0,  # 1111 (15) - largest negative normal
+    ],
+    dtype=torch.float32,
+)
 
 # Cache FP4 values per device for performance
 _FP4_CACHE = {}
+
 
 # Get device-specific FP4 values with caching
 def get_fp4_values(device):
     if device not in _FP4_CACHE:
         _FP4_CACHE[device] = FP4_VALUES.to(device)
     return _FP4_CACHE[device]
+
 
 class QuantState:
     """Container for quantization state components"""
@@ -117,7 +122,9 @@ def quantize_4bit(
     n = A.numel()
 
     # Ensure tensor size is divisible by blocksize for simplicity
-    assert n % blocksize == 0, f"Tensor size {n} must be divisible by blocksize {blocksize}"
+    assert (
+        n % blocksize == 0
+    ), f"Tensor size {n} must be divisible by blocksize {blocksize}"
 
     # Fast path: reshape to blocks and compute absmax
     # Use torch.view instead of reshape when possible for better performance
@@ -158,9 +165,12 @@ def quantize_4bit(
 
         # Get corresponding absmax values
         block_indices = torch.arange(block_start, block_end, device=device)
-        chunk_absmax = absmax[block_indices].unsqueeze(1).repeat_interleave(
-            blocksize, dim=1
-        ).flatten()[:chunk_size_actual]
+        chunk_absmax = (
+            absmax[block_indices]
+            .unsqueeze(1)
+            .repeat_interleave(blocksize, dim=1)
+            .flatten()[:chunk_size_actual]
+        )
 
         # Extract chunk data and normalize
         chunk_data = A.flatten()[chunk_start:chunk_end]
@@ -176,7 +186,7 @@ def quantize_4bit(
 
     # Efficient bit packing using vectorized operations
     # For even indices, shift left by 4
-    even_indices = torch.arange(0, n-1, 2, device=device)
+    even_indices = torch.arange(0, n - 1, 2, device=device)
     odd_indices = even_indices + 1
 
     if even_indices.numel() > 0:
@@ -186,8 +196,7 @@ def quantize_4bit(
 
         # Pack values
         packed = torch.bitwise_or(
-            torch.bitwise_left_shift(even_values, 4),
-            odd_values
+            torch.bitwise_left_shift(even_values, 4), odd_values
         ).to(torch.uint8)
 
         # Scatter to output tensor
@@ -208,7 +217,7 @@ def quantize_4bit(
         dtype=A.dtype,
         blocksize=blocksize,
         quant_type=quant_type,
-        code=fp4_values
+        code=fp4_values,
     )
 
     return out, state
@@ -281,7 +290,7 @@ def dequantize_4bit(
             blocksize=blocksize,
             quant_type=quant_type,
             code=get_fp4_values(device),
-            dtype=torch.float32
+            dtype=torch.float32,
         )
     else:
         # Use the absmax from quant_state
@@ -311,8 +320,7 @@ def dequantize_4bit(
     even_indices = torch.arange(0, n, 2, device=device)
     if even_indices.numel() > 0:
         high_bits = torch.bitwise_and(
-            torch.bitwise_right_shift(bytes_tensor[even_indices // 2], 4),
-            0xF
+            torch.bitwise_right_shift(bytes_tensor[even_indices // 2], 4), 0xF
         )
         # Use index_put_ for efficient writing
         unpacked.index_put_((even_indices,), high_bits)
